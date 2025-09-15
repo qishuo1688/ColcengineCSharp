@@ -1,12 +1,128 @@
 ﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ColcengineCSharp
 {
+    public static class Audio
+    {
+        public static async Task Create(string filePathWithoutExtension, AudioOptions options)
+        {
+            StringBuilder sb = new StringBuilder();
+            using var webSocket = new System.Net.WebSockets.ClientWebSocket();
+            var cancellationTokenSource = new CancellationTokenSource();
+            webSocket.Options.SetRequestHeader("Authorization", $"Bearer;{options.AccessToken}");
+            // webSocket.Options.CollectHttpResponseDetails = true;
+
+            await webSocket.ConnectAsync(new Uri(options.Endpoint), cancellationTokenSource.Token);
+
+            //var responseHeaders = webSocket.HttpResponseHeaders;
+
+            // Prepare request
+            var request = new Dictionary<string, object>
+            {
+                ["app"] = new Dictionary<string, object>
+                {
+                    ["appid"] = options.AppId,
+                    ["token"] = options.AccessToken,
+                    ["cluster"] = options.GetCluster()
+                },
+                ["user"] = new Dictionary<string, object>
+                {
+                    ["uid"] = Guid.NewGuid().ToString()
+                },
+                ["audio"] = new Dictionary<string, object>
+                {
+                    ["voice_type"] = options.VoiceType,
+                    ["encoding"] = options.AudioEncoding,
+                    ["speed_ratio"] = options.SpeedRatio,
+                    ["emotion"] = options.Emotion,
+                    ["enable_emotion"] = options.EnableEmotion,
+                    ["emotion_scale"] = options.EmotionScale
+                },
+
+                ["request"] = new Dictionary<string, object>
+                {
+                    ["reqid"] = Guid.NewGuid().ToString(),
+                    ["text"] = options.Text,
+                    ["operation"] = "query",
+                    ["with_timestamp"] = "1",
+
+                    ["extra_param"] = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["disable_markdown_filter"] = false,
+                    })
+                }
+            };
+
+            // Send text request
+            await ClientHelper.FullClientRequest(webSocket, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request), cancellationTokenSource.Token);
+
+            // Receive audio data
+            var audio = new List<byte>();
+            while (true)
+            {
+                var message = await ClientHelper.ReceiveMessage(webSocket, cancellationTokenSource.Token);
+
+                switch (message.MsgType)
+                {
+                    case MsgType.FrontEndResultServer:
+                        if (message.Payload != null && message.Payload.Length > 0)
+                        {
+                            sb.Append(message);
+                        }
+                        break;
+                    case MsgType.AudioOnlyServer:
+                        if (message.Payload != null && message.Payload.Length > 0)
+                        {
+                            audio.AddRange(message.Payload);
+                        }
+                        break;
+                    default:
+                        throw new Exception($"{message}");
+                }
+
+                if (message.MsgType == MsgType.AudioOnlyServer && message.Sequence < 0)
+                {
+                    break;
+                }
+            }
+
+            if (audio.Count == 0)
+            {
+                throw new Exception("Audio is empty");
+            }
+
+            string filename = $"{filePathWithoutExtension}.{options.AudioEncoding}";
+            File.WriteAllBytes(filename, audio.ToArray());
+            cancellationTokenSource.Cancel();
+
+            string text = sb.ToString();
+            int payloadIndex = text.IndexOf("Payload:");
+            if (payloadIndex < 0)
+            {
+                throw new Exception("No Payload found in the response");
+            }
+            string payloadStr = text.Substring(payloadIndex + "Payload:".Length).Trim();
+
+            // 先反序列化成动态对象
+            var tmp = JObject.Parse(payloadStr);
+            tmp["frontend"] = JObject.Parse(tmp["frontend"].ToString());
+            File.WriteAllText($"{filePathWithoutExtension}.json", tmp.ToString(Formatting.Indented));
+
+
+
+        }
+    }
+
+
     public static class ColcengineExtensions
     {
         /// <summary>
@@ -28,11 +144,11 @@ namespace ColcengineCSharp
         /// </param>
         /// <param name="apiKey">apiKey</param>
         /// <returns>大模型返回的消息</returns>
-        public static async Task<string> ChatAsync(this HttpClient client, object obj,string apiKey)
+        public static async Task<string> ChatAsync(this HttpClient client, object obj, string apiKey)
         {
             HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "https://ark.cn-beijing.volces.com/api/v3/chat/completions");
             request.Headers.Add("Authorization", $"Bearer {apiKey}");
-           
+
             request.Content = new StringContent(JsonConvert.SerializeObject(obj, Formatting.Indented));
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             HttpResponseMessage response = await client.SendAsync(request);
@@ -40,7 +156,7 @@ namespace ColcengineCSharp
             string responseBody = await response.Content.ReadAsStringAsync();
             var jObj = JObject.Parse(responseBody);
             return (string)jObj["choices"]?[0]?["message"]?["content"];
-           
+
         }
 
 
@@ -74,7 +190,7 @@ namespace ColcengineCSharp
             string responseBody = await response.Content.ReadAsStringAsync();
             var jObj = JObject.Parse(responseBody);
 
-            var jFormat = JObject.Parse(json)["response_format"]??"url";
+            var jFormat = JObject.Parse(json)["response_format"] ?? "url";
             return (string)jObj["data"]?[0]?[jFormat.ToString()];
 
         }
@@ -127,13 +243,13 @@ namespace ColcengineCSharp
             response.EnsureSuccessStatusCode();
             string responseBody = await response.Content.ReadAsStringAsync();
             var jObj = JObject.Parse(responseBody);
-            
+
             switch (jObj["status"]?.ToString())
             {
                 case "succeeded":
                     result.IsComplete = true;
                     result.Message = jObj["content"]?["video_url"]?.ToString();
-                    break ;
+                    break;
                 case "queued":
                 case "running":
                     result.IsComplete = false;
@@ -141,12 +257,14 @@ namespace ColcengineCSharp
                 case "failed":
                     result.IsComplete = true;
                     result.Message = jObj["error"]?["message"]?.ToString();
-                    break ;
+                    break;
             }
-            return result;  
+            return result;
         }
 
     }
+
+
 
     public class VideoTaskResult
     {

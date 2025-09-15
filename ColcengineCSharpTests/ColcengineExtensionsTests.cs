@@ -1,32 +1,38 @@
 ﻿using Xunit;
-using ColcengineCSharp;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace ColcengineCSharp.Tests
 {
     public class ColcengineExtensionsTests
     {
+       
         [Fact()]
         public async Task ChatAsyncTestAsync()
         {
             var obj = new
             {
-                model = "doubao-1-5-pro-32k-250115",
+                model = "doubao-1-5-pro-32k-2501151",
                 messages = new[]
                 {
                     new { role = "system", content = "你是一个助手" },
                     new { role = "user", content = "你是谁?" }
                 }
             };
-
-            using HttpClient client = new HttpClient();
-
-            string res = await client.ChatAsync(obj, "1ce0a728-5652-43eb-917e-c5fa6fd4e992");
+            try
+            {
 
 
-            Xunit.Assert.NotNull(res);
+                using HttpClient client = new HttpClient();
+
+                string res = await client.ChatAsync(obj, Environment.GetEnvironmentVariable("DouBaoAPIkey"));
+                Xunit.Assert.NotNull(res);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                throw;
+            }
+
+
 
         }
 
@@ -44,7 +50,7 @@ namespace ColcengineCSharp.Tests
 
             using HttpClient client = new HttpClient();
 
-            var url = await client.ImageGenerateAsync(obj, "1ce0a728-5652-43eb-917e-c5fa6fd4e992");
+            var url = await client.ImageGenerateAsync(obj,Environment.GetEnvironmentVariable("DouBaoAPIkey"));
 
             Xunit.Assert.NotNull(url);
         }
@@ -62,7 +68,7 @@ namespace ColcengineCSharp.Tests
                 }
             };
             using HttpClient client = new HttpClient();
-            var id = await client.VideoTaskCreateAsync(obj, "1ce0a728-5652-43eb-917e-c5fa6fd4e992");
+            var id = await client.VideoTaskCreateAsync(obj,Environment.GetEnvironmentVariable("DouBaoAPIkey"));
             Xunit.Assert.NotNull(id);
         }
 
@@ -70,7 +76,7 @@ namespace ColcengineCSharp.Tests
         public async Task CheckVideoTaskTestAsync()
         {
             using HttpClient client = new HttpClient();
-            var id = await client.CheckVideoTask("cgt-20250912141001-8tq7n1", "1ce0a728-5652-43eb-917e-c5fa6fd4e992");
+            var id = await client.CheckVideoTask("cgt-20250912141001-8tq7n1",Environment.GetEnvironmentVariable("DouBaoAPIkey"));
 
             Xunit.Assert.NotNull(id);
         }
